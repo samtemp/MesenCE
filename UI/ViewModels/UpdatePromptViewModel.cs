@@ -29,6 +29,32 @@ namespace Mesen.ViewModels
 
 		private UpdateFileInfo? _fileInfo;
 
+		private const string DefaultFeedUrl = "https://raw.githubusercontent.com/nesdev-org/MesenAutoUpdate/refs/heads/main/latestversion.json";
+		private static readonly string[] DefaultDownloadPrefixes = new string[] { "https://github.com/nesdev-org/", "https://github.com/SourMesen/" };
+
+		//Optional override: set MESEN_UPDATE_FEED to the raw URL of a latestversion.json (e.g. from your own MesenAutoUpdate fork).
+		//Downloads are then also accepted from that GitHub account (https://github.com/<account>/).
+		private static string? CustomFeed {
+			get {
+				string? feed = Environment.GetEnvironmentVariable("MESEN_UPDATE_FEED");
+				return feed != null && feed.StartsWith("https://raw.githubusercontent.com/") ? feed : null;
+			}
+		}
+
+		private static string FeedUrl => CustomFeed ?? DefaultFeedUrl;
+
+		private static string[] AllowedDownloadPrefixes {
+			get {
+				string? feed = CustomFeed;
+				if(feed == null) {
+					return DefaultDownloadPrefixes;
+				}
+				string account = feed.Substring("https://raw.githubusercontent.com/".Length).Split('/')[0];
+				return DefaultDownloadPrefixes.Append("https://github.com/" + account + "/").ToArray();
+			}
+		}
+
+
 		public UpdatePromptViewModel(UpdateInfo updateInfo, UpdateFileInfo? file)
 		{
 			LatestVersion = updateInfo.LatestVersion;
@@ -43,13 +69,13 @@ namespace Mesen.ViewModels
 			UpdateInfo? updateInfo = null;
 			try {
 				using(var client = new HttpClient()) {
-					string updateData = await client.GetStringAsync("https://raw.githubusercontent.com/nesdev-org/MesenAutoUpdate/refs/heads/main/latestversion.json");
+					string updateData = await client.GetStringAsync(FeedUrl);
 					updateInfo = (UpdateInfo?)JsonSerializer.Deserialize(updateData, typeof(UpdateInfo), MesenSerializerContext.Default);
 
 					if(
 						updateInfo == null ||
 						updateInfo.Files == null ||
-						updateInfo.Files.Where(f => f.DownloadUrl == null || (!f.DownloadUrl.StartsWith("https://github.com/nesdev-org/") && !f.DownloadUrl.StartsWith("https://github.com/SourMesen/"))).Count() > 0
+						updateInfo.Files.Where(f => f.DownloadUrl == null || !AllowedDownloadPrefixes.Any(p => f.DownloadUrl.StartsWith(p))).Count() > 0
 					) {
 						return null;
 					}
